@@ -55,7 +55,7 @@ const PRESETS = {
 };
 
 self.onmessage = function (e) {
-  const { code, preset, custom, sourceMap } = e.data;
+  const { requestId, code, preset, custom, sourceMap } = e.data;
 
   try {
     const baseOptions = preset === 'custom' ? (custom || {}) : { ...PRESETS[preset] };
@@ -74,6 +74,7 @@ self.onmessage = function (e) {
     const result = JavaScriptObfuscator.obfuscate(code, options);
 
     self.postMessage({
+      requestId,
       ok: true,
       code: result.getObfuscatedCode(),
       sourceMap: sourceMap ? result.getSourceMap() : null,
@@ -94,6 +95,7 @@ self.onmessage = function (e) {
     }
 
     self.postMessage({
+      requestId,
       ok: false,
       error: message,
       line: line,

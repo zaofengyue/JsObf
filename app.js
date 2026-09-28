@@ -98,9 +98,126 @@ const els = {
 let currentPreset = 'low';
 let lastMap = null;
 let worker = null;
+let activeRequestId = 0;
+let watchdogTimer = null;
 
+function setEngineStatus(state, msg) {
+  els.statusIndicator.className = `status-indicator ${state}`;
+  els.statusIndicatorText.textContent = msg;
+}
+
+function showError(msg) {
+  els.errorBox.textContent = msg;
+  els.errorBox.style.display = 'block';
+}
+
+function hideError() {
+  els.errorBox.textContent = '';
+  els.errorBox.style.display = 'none';
+}
+
+function resetRunningState() {
+  if (watchdogTimer) {
+    clearTimeout(watchdogTimer);
+    watchdogTimer = null;
+  }
+  els.obfuscateBtn.disabled = false;
+}
+
+// 统一的 Worker 消息处理（校验 requestId）
+function handleWorkerMessage(e) {
+  if (!e.data || e.data.requestId !== activeRequestId) {
+    // 丢弃非当前请求的过期响应，消除异步竞态
+    return;
+  }
+
+  resetRunningState();
+  const { ok, code: result, error, line, column, sourceMap: map } = e.data;
+
+  if (!ok) {
+    setEngineStatus('error', '混淆失败');
+    els.output.value = '';
+    els.outputMeta.textContent = '—';
+    els.statsPanel.style.display = 'none';
+
+    let errorMsg = `混淆执行失败: ${error}`;
+    if (line !== null && line !== undefined) {
+      errorMsg = `[语法错误 SyntaxError] 第 ${line} 行，第 ${column || 0} 列：\n${error}\n\n请检查源码中是否存在尚未闭合的括号、非法变量名或非标准 JS 语法。`;
+    }
+    showError(errorMsg);
+    return;
+  }
+
+  els.output.value = result;
+  const origCode = els.input.value.trim();
+  const origBytes = bytes(origCode);
+  const obfBytes = bytes(result);
+  const origLines = origCode ? origCode.split('\n').length : 0;
+  const obfLines = result ? result.split('\n').length : 0;
+
+  els.outputMeta.textContent = `${obfLines} 行 · ${formatBytes(obfBytes)}`;
+
+  // 渲染统计指标
+  els.statOrigSize.textContent = formatBytes(origBytes);
+  els.statObfSize.textContent = formatBytes(obfBytes);
+  els.statLinesCompare.textContent = `${origLines} 行 → ${obfLines} 行`;
+
+  const deltaPercent = origBytes === 0 ? 0 : (((obfBytes - origBytes) / origBytes) * 100).toFixed(1);
+  if (deltaPercent >= 0) {
+    els.statDeltaRate.className = 'stats-badge grow';
+    els.statDeltaRate.textContent = `+${deltaPercent}% (体积膨胀)`;
+  } else {
+    els.statDeltaRate.className = 'stats-badge shrink';
+    els.statDeltaRate.textContent = `${deltaPercent}% (体积压缩)`;
+  }
+  els.statsPanel.style.display = 'grid';
+
+  els.copyBtn.disabled = false;
+  els.downloadBtn.disabled = false;
+
+  if (map) {
+    lastMap = map;
+    els.downloadMapBtn.hidden = false;
+    els.downloadMapBtn.disabled = false;
+  } else {
+    lastMap = null;
+  }
+
+  setEngineStatus('ready', '混淆完成');
+}
+
+// 获取 Worker 实例并挂载健壮的生命周期错误监听
 function getWorker() {
-  if (!worker) worker = new Worker('worker.js');
+  if (!worker) {
+    try {
+      worker = new Worker('worker.js');
+    } catch (err) {
+      setEngineStatus('error', 'Worker 创建失败');
+      showError(`Web Worker 初始化失败: ${err && err.message ? err.message : String(err)}\n\n排查建议：请勿直接通过 file:// 协议双击打开网页（浏览器的同源安全策略会拦截 Worker 脚本）。推荐通过本地静态服务器（如运行 python -m http.server 8080）访问。`);
+      return null;
+    }
+
+    worker.onmessage = handleWorkerMessage;
+
+    worker.onerror = (event) => {
+      resetRunningState();
+      setEngineStatus('error', 'Worker 异常挂起');
+      const msg = event && event.message ? event.message : 'Web Worker 内部加载或脚本解析发生错误';
+      showError(`[Web Worker 异常] ${msg}\n\n可能原因：\n1. 直接使用 file:// 协议打开，触发同源隔离限制；\n2. lib/javascript-obfuscator.browser.js 路径未找到或加载受 CSP 拦截。\n建议：通过静态 HTTP 服务访问本工具。`);
+      
+      // 终止并重置，防止 Worker 损坏后后续混淆死锁
+      if (worker) {
+        worker.terminate();
+        worker = null;
+      }
+    };
+
+    worker.onmessageerror = () => {
+      resetRunningState();
+      setEngineStatus('error', 'Worker 序列化错误');
+      showError('Web Worker 消息反序列化异常，传输数据可能损坏或超出浏览器限制。');
+    };
+  }
   return worker;
 }
 
@@ -121,11 +238,6 @@ function updateInputMeta() {
   els.inputMeta.textContent = `${lines} 行 · ${formatBytes(bytes(code))}`;
 }
 
-function setEngineStatus(state, msg) {
-  els.statusIndicator.className = `status-indicator ${state}`;
-  els.statusIndicatorText.textContent = msg;
-}
-
 // 标签切换
 els.tabs.forEach((tab) => {
   tab.addEventListener('click', () => {
@@ -141,8 +253,7 @@ els.tabs.forEach((tab) => {
 els.btnExample.addEventListener('click', () => {
   els.input.value = EXAMPLE_JS;
   updateInputMeta();
-  els.errorBox.style.display = 'none';
-  els.errorBox.textContent = '';
+  hideError();
 });
 
 els.btnClear.addEventListener('click', () => {
@@ -150,7 +261,7 @@ els.btnClear.addEventListener('click', () => {
   els.output.value = '';
   els.outputMeta.textContent = '—';
   els.statsPanel.style.display = 'none';
-  els.errorBox.style.display = 'none';
+  hideError();
   els.copyBtn.disabled = true;
   els.downloadBtn.disabled = true;
   els.downloadMapBtn.hidden = true;
@@ -204,7 +315,7 @@ function readFile(file) {
   reader.onload = () => {
     els.input.value = reader.result;
     updateInputMeta();
-    els.errorBox.style.display = 'none';
+    hideError();
   };
   reader.readAsText(file);
 }
@@ -216,18 +327,75 @@ els.fileInput.addEventListener('change', () => {
 els.input.addEventListener('input', updateInputMeta);
 updateInputMeta();
 
+// 联动校验与防呆：清洗并验证用户输入的域名
+function sanitizeAndValidateDomain(domainStr) {
+  if (!domainStr || !domainStr.trim()) {
+    return { ok: true, domains: [] };
+  }
+  const parts = domainStr.split(',').map((s) => s.trim()).filter(Boolean);
+  const cleaned = [];
+  const invalid = [];
+
+  for (const raw of parts) {
+    // 自动剥离用户误填的 http://、https:// 前缀、路径后缀以及端口号
+    let clean = raw.replace(/^https?:\/\//i, '').replace(/:\d+$/, '').replace(/\/.*$/, '').trim();
+    // 基础主机名/域名正则校验 (允许 localhost、example.com、*.example.com、sub.example.com 等)
+    const domainRegex = /^(\*\.)?([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$|^localhost$/i;
+    if (domainRegex.test(clean)) {
+      cleaned.push(clean);
+    } else {
+      invalid.push(raw);
+    }
+  }
+
+  if (invalid.length > 0) {
+    return {
+      ok: false,
+      error: `域名锁定格式不合法: "${invalid.join(', ')}"\n请输入标准的主机名或域名（如 example.com 或 api.site.com，无需加 http:// 或 / 路径）。`,
+      domains: cleaned,
+    };
+  }
+
+  return { ok: true, domains: cleaned };
+}
+
+// 选项动态联动与互锁（UI Interlock）
+function syncOptionInterlocks() {
+  const isStringDisabled = els.optStringEncoding.value === 'none';
+
+  // 当字符串未开启加密时，依赖于字符串数组的打乱与分块强制禁用并置灰
+  els.optStringRotate.disabled = isStringDisabled;
+  els.optSplitStrings.disabled = isStringDisabled;
+
+  const rotateLabel = els.optStringRotate.closest('.option-check');
+  const splitLabel = els.optSplitStrings.closest('.option-check');
+
+  if (rotateLabel) rotateLabel.classList.toggle('is-disabled', isStringDisabled);
+  if (splitLabel) splitLabel.classList.toggle('is-disabled', isStringDisabled);
+
+  if (isStringDisabled) {
+    els.optStringRotate.checked = false;
+    els.optSplitStrings.checked = false;
+  }
+}
+
 // 高风险选项动态提示
 function checkRiskWarnings() {
+  syncOptionInterlocks();
   const warnings = [];
+
   if (els.optSelfDefending.checked) {
-    warnings.push('「自我防御」：开启后，任何美化格式化或篡改混淆代码的操作都会使程序拒绝运行。');
+    warnings.push('「自我防御」：代码将强制以紧凑压缩模式运行，任何外部格式化、美化或篡改都会直接触发死循环阻断。');
   }
   if (els.optDebugProtection.checked) {
-    warnings.push('「调试保护」：开启后，在打开开发者工具 (F12) 时将触发无限断点并冻结页面。');
+    warnings.push('「调试保护」：在浏览器中打开 DevTools (F12) 控制台时将触发无限断点并冻结页面。');
   }
-  const domain = els.optDomainLock.value.trim();
-  if (domain) {
-    warnings.push(`「域名锁定」：代码将仅限在 [${domain}] 运行，在本地文件或其他域名中打开会直接抛出异常。`);
+  const domainRaw = els.optDomainLock.value.trim();
+  if (domainRaw) {
+    const domainCheck = sanitizeAndValidateDomain(domainRaw);
+    if (domainCheck.ok && domainCheck.domains.length > 0) {
+      warnings.push(`「域名锁定」：代码将仅限在 [${domainCheck.domains.join(', ')}] 运行，在未绑定的域名或本地打开将直接无法执行。`);
+    }
   }
 
   if (warnings.length > 0) {
@@ -239,23 +407,27 @@ function checkRiskWarnings() {
   }
 }
 
+els.optStringEncoding.addEventListener('change', checkRiskWarnings);
 [els.optSelfDefending, els.optDebugProtection, els.optDomainLock].forEach((item) => {
   item.addEventListener('input', checkRiskWarnings);
   item.addEventListener('change', checkRiskWarnings);
 });
 
-function readCustomOptions() {
+// 初始化选项互锁状态
+syncOptionInterlocks();
+
+function readCustomOptions(validatedDomains) {
   const identifierNamesGenerator = els.optIdentifier.value;
   const stringEncoding = els.optStringEncoding.value;
-  const domainRaw = els.optDomainLock.value.trim();
   const seedRaw = els.optSeed.value.trim();
+  const isStringArrayEnabled = stringEncoding !== 'none';
 
   const options = {
     compact: true,
     identifierNamesGenerator,
     numbersToExpressions: els.optNumbersToExpressions.checked,
     unicodeEscapeSequence: els.optUnicodeEscapeSequence.checked,
-    splitStrings: els.optSplitStrings.checked,
+    splitStrings: isStringArrayEnabled && els.optSplitStrings.checked,
     splitStringsChunkLength: 5,
     transformObjectKeys: els.optTransformObjectKeys.checked,
     disableConsoleOutput: els.optDisableConsole.checked,
@@ -263,11 +435,11 @@ function readCustomOptions() {
     controlFlowFlatteningThreshold: 0.75,
     deadCodeInjection: els.optDeadCode.checked,
     deadCodeInjectionThreshold: 0.4,
-    stringArray: stringEncoding !== 'none',
-    stringArrayEncoding: stringEncoding === 'none' ? [] : [stringEncoding],
+    stringArray: isStringArrayEnabled,
+    stringArrayEncoding: isStringArrayEnabled ? [stringEncoding] : [],
     stringArrayThreshold: 0.75,
-    stringArrayRotate: els.optStringRotate.checked,
-    stringArrayShuffle: els.optStringRotate.checked,
+    stringArrayRotate: isStringArrayEnabled && els.optStringRotate.checked,
+    stringArrayShuffle: isStringArrayEnabled && els.optStringRotate.checked,
     selfDefending: els.optSelfDefending.checked,
     debugProtection: els.optDebugProtection.checked,
   };
@@ -276,8 +448,8 @@ function readCustomOptions() {
     options.seed = seedRaw;
   }
 
-  if (domainRaw) {
-    options.domainLock = domainRaw.split(',').map((s) => s.trim()).filter(Boolean);
+  if (validatedDomains && validatedDomains.length > 0) {
+    options.domainLock = validatedDomains;
   }
 
   return options;
@@ -287,15 +459,27 @@ function readCustomOptions() {
 els.obfuscateBtn.addEventListener('click', () => {
   const code = els.input.value.trim();
   if (!code) {
-    els.errorBox.style.display = 'block';
-    els.errorBox.textContent = '提示：请先在左侧输入或上传一段 JavaScript 代码。';
+    showError('提示：请先在左侧输入或上传一段 JavaScript 代码。');
     return;
+  }
+
+  let validatedDomains = [];
+  if (currentPreset === 'custom') {
+    const domainRaw = els.optDomainLock.value.trim();
+    if (domainRaw) {
+      const domainCheck = sanitizeAndValidateDomain(domainRaw);
+      if (!domainCheck.ok) {
+        showError(domainCheck.error);
+        return;
+      }
+      validatedDomains = domainCheck.domains;
+    }
   }
 
   const sourceMap = currentPreset === 'custom' && els.optSourceMap.checked;
 
   const risky = currentPreset === 'custom' &&
-    (els.optDebugProtection.checked || els.optDomainLock.value.trim());
+    (els.optDebugProtection.checked || validatedDomains.length > 0);
 
   if (risky && !confirm(
     '当前开启了「调试保护」或「域名锁定」——若未部署到目标域名或试图调试，代码将无法正常执行。确认以此配置混淆吗？'
@@ -303,77 +487,39 @@ els.obfuscateBtn.addEventListener('click', () => {
     return;
   }
 
+  const w = getWorker();
+  if (!w) return;
+
+  const reqId = ++activeRequestId;
+
   els.obfuscateBtn.disabled = true;
   els.copyBtn.disabled = true;
   els.downloadBtn.disabled = true;
   els.downloadMapBtn.disabled = true;
   els.downloadMapBtn.hidden = true;
-  els.errorBox.style.display = 'none';
-  els.errorBox.textContent = '';
+  hideError();
   setEngineStatus('running', '正在混淆…（高强度计算可能需要数秒）');
 
+  // 60秒超时保护 Watchdog，防止不可恢复的死循环卡死
+  if (watchdogTimer) clearTimeout(watchdogTimer);
+  watchdogTimer = setTimeout(() => {
+    if (els.obfuscateBtn.disabled && activeRequestId === reqId) {
+      if (worker) {
+        worker.terminate();
+        worker = null;
+      }
+      resetRunningState();
+      setEngineStatus('error', '混淆执行超时');
+      showError('混淆执行超时（已超过 60 秒）已自动终止保护。\n建议：源码较大或嵌套较深时，请尝试关闭「控制流平坦化」或「死代码注入」以减少计算开销。');
+    }
+  }, 60000);
+
   const payload = {
+    requestId: reqId,
     code,
     preset: currentPreset,
-    custom: currentPreset === 'custom' ? readCustomOptions() : null,
+    custom: currentPreset === 'custom' ? readCustomOptions(validatedDomains) : null,
     sourceMap,
-  };
-
-  const w = getWorker();
-  w.onmessage = (e) => {
-    els.obfuscateBtn.disabled = false;
-    const { ok, code: result, error, line, column, sourceMap: map } = e.data;
-
-    if (!ok) {
-      setEngineStatus('error', '混淆失败');
-      els.output.value = '';
-      els.outputMeta.textContent = '—';
-      els.statsPanel.style.display = 'none';
-
-      let errorMsg = `混淆执行失败: ${error}`;
-      if (line !== null && line !== undefined) {
-        errorMsg = `[语法错误 SyntaxError] 第 ${line} 行，第 ${column || 0} 列：\n${error}\n\n请检查源码中是否存在尚未闭合的括号、非法变量名或非标准 JS 语法。`;
-      }
-      els.errorBox.textContent = errorMsg;
-      els.errorBox.style.display = 'block';
-      return;
-    }
-
-    els.output.value = result;
-    const origBytes = bytes(code);
-    const obfBytes = bytes(result);
-    const origLines = code.split('\n').length;
-    const obfLines = result.split('\n').length;
-
-    els.outputMeta.textContent = `${obfLines} 行 · ${formatBytes(obfBytes)}`;
-
-    // 渲染统计指标
-    els.statOrigSize.textContent = formatBytes(origBytes);
-    els.statObfSize.textContent = formatBytes(obfBytes);
-    els.statLinesCompare.textContent = `${origLines} 行 → ${obfLines} 行`;
-
-    const deltaPercent = origBytes === 0 ? 0 : (((obfBytes - origBytes) / origBytes) * 100).toFixed(1);
-    if (deltaPercent >= 0) {
-      els.statDeltaRate.className = 'stats-badge grow';
-      els.statDeltaRate.textContent = `+${deltaPercent}% (体积膨胀)`;
-    } else {
-      els.statDeltaRate.className = 'stats-badge shrink';
-      els.statDeltaRate.textContent = `${deltaPercent}% (体积压缩)`;
-    }
-    els.statsPanel.style.display = 'grid';
-
-    els.copyBtn.disabled = false;
-    els.downloadBtn.disabled = false;
-
-    if (map) {
-      lastMap = map;
-      els.downloadMapBtn.hidden = false;
-      els.downloadMapBtn.disabled = false;
-    } else {
-      lastMap = null;
-    }
-
-    setEngineStatus('ready', '混淆完成');
   };
 
   w.postMessage(payload);
@@ -396,15 +542,24 @@ els.copyBtn.addEventListener('click', async () => {
   }
 });
 
-// 下载文件
+// 安全文件下载：解决移动端/特定浏览器异步下载取消风险与 Blob 内存泄漏
 function download(filename, content) {
   const blob = new Blob([content], { type: 'text/javascript;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
+  a.style.display = 'none';
   a.href = url;
   a.download = filename;
+
+  // 必须挂载至 DOM 树以兼容沙箱与部分现代浏览器安全策略
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(url);
+  document.body.removeChild(a);
+
+  // 延时 4000ms 撤销对象 URL，确保异步下载流程完整拉起，避免网络错误，同时防止内存泄漏
+  setTimeout(() => {
+    URL.revokeObjectURL(url);
+  }, 4000);
 }
 
 els.downloadBtn.addEventListener('click', () => {

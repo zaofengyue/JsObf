@@ -190,6 +190,14 @@ main {
   gap: 8px;
   cursor: pointer;
 }
+.option-check.is-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+.option-check input:disabled {
+  cursor: not-allowed;
+}
 .option-check input {
   margin-top: 3px;
   accent-color: var(--accent);
