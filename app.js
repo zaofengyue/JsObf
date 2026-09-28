@@ -63,6 +63,7 @@ const els = {
   fileInput: document.getElementById('fileInput'),
   btnExample: document.getElementById('btnExample'),
   btnClear: document.getElementById('btnClear'),
+  cancelBtn: document.getElementById('cancelBtn'),
   obfuscateBtn: document.getElementById('obfuscateBtn'),
   copyBtn: document.getElementById('copyBtn'),
   downloadBtn: document.getElementById('downloadBtn'),
@@ -95,6 +96,11 @@ const els = {
   optDomainLock: document.getElementById('optDomainLock'),
 };
 
+const COST_S_PER_MB = { low: 8, medium: 15, high: 70 };
+const MAX_INPUT_BYTES = { low: 10 << 20, medium: 5 << 20, high: 2 << 20 };
+const OUTPUT_DISPLAY_LIMIT = 2 << 20; // 2 MB
+let lastOutput = '';
+
 let currentPreset = 'low';
 let lastMap = null;
 let worker = null;
@@ -108,6 +114,21 @@ function countLines(s) {
   let n = 1, i = -1;
   while ((i = s.indexOf('\n', i + 1)) !== -1) n++;
   return n;
+}
+
+function costTier(preset) {
+  if (preset !== 'custom') return preset;
+  return (els.optControlFlow.checked || els.optDeadCode.checked) ? 'high' : 'medium';
+}
+
+function estimateRun(preset, byteLen) {
+  const tier = costTier(preset);
+  const seconds = 2 + COST_S_PER_MB[tier] * (byteLen / (1 << 20));
+  return {
+    tier,
+    seconds,
+    timeoutMs: Math.max(60000, Math.ceil((seconds * 2 + 20) * 1000)),
+  };
 }
 
 function setEngineStatus(state, msg) {
@@ -132,10 +153,34 @@ function resetRunningState() {
   }
   els.obfuscateBtn.disabled = false;
   els.obfuscateBtn.textContent = '▶ 混淆代码';
+  if (els.cancelBtn) els.cancelBtn.hidden = true;
+}
+
+function cancelIfRunning() {
+  activeRequestId++;
+  if (els.obfuscateBtn.disabled && worker) {
+    worker.terminate();
+    worker = null;
+  }
+  resetRunningState();
+}
+
+if (els.cancelBtn) {
+  els.cancelBtn.addEventListener('click', () => {
+    cancelIfRunning();
+    setEngineStatus('ready', '已取消混淆任务');
+  });
 }
 
 // 统一的 Worker 消息处理（校验 requestId）
 function handleWorkerMessage(e) {
+  if (e.data && e.data.type === 'ready') {
+    if (!els.obfuscateBtn.disabled) {
+      setEngineStatus('ready', '引擎就绪');
+    }
+    return;
+  }
+
   if (!e.data || e.data.requestId !== activeRequestId) {
     return;
   }
@@ -146,6 +191,7 @@ function handleWorkerMessage(e) {
   if (!ok) {
     setEngineStatus('error', '混淆失败');
     els.output.value = '';
+    lastOutput = '';
     els.outputMeta.textContent = '—';
     els.statsPanel.style.display = 'none';
 
@@ -157,11 +203,15 @@ function handleWorkerMessage(e) {
     return;
   }
 
-  els.output.value = result;
+  lastOutput = result;
   const origBytes = runSnapshot ? runSnapshot.bytes : 0;
   const origLines = runSnapshot ? runSnapshot.lines : 0;
   const obfBytes = bytes(result);
   const obfLines = countLines(result);
+
+  els.output.value = obfBytes > OUTPUT_DISPLAY_LIMIT
+    ? `/* 输出 ${formatBytes(obfBytes)}，超过浏览器文本框直接预览上限（2 MB）。\n请使用下方「复制结果」或「下载 .js」获取完整代码。 */`
+    : result;
 
   els.outputMeta.textContent = `${obfLines} 行 · ${formatBytes(obfBytes)}`;
 
@@ -251,8 +301,12 @@ function updateInputMeta() {
 
 els.tabs.forEach((tab) => {
   tab.addEventListener('click', () => {
-    els.tabs.forEach((t) => t.classList.remove('is-active'));
+    els.tabs.forEach((t) => {
+      t.classList.remove('is-active');
+      t.setAttribute('aria-selected', 'false');
+    });
     tab.classList.add('is-active');
+    tab.setAttribute('aria-selected', 'true');
     currentPreset = tab.dataset.preset;
     els.presetDesc.textContent = PRESET_DESC[currentPreset];
     els.customPanel.hidden = currentPreset !== 'custom';
@@ -260,26 +314,17 @@ els.tabs.forEach((tab) => {
 });
 
 els.btnExample.addEventListener('click', () => {
-  activeRequestId++;
-  if (worker) {
-    worker.terminate();
-    worker = null;
-  }
-  resetRunningState();
+  cancelIfRunning();
   els.input.value = EXAMPLE_JS;
   updateInputMeta();
   hideError();
 });
 
 els.btnClear.addEventListener('click', () => {
-  activeRequestId++;
-  if (worker) {
-    worker.terminate();
-    worker = null;
-  }
-  resetRunningState();
+  cancelIfRunning();
   els.input.value = '';
   els.output.value = '';
+  lastOutput = '';
   els.outputMeta.textContent = '—';
   els.statsPanel.style.display = 'none';
   hideError();
@@ -290,23 +335,30 @@ els.btnClear.addEventListener('click', () => {
   updateInputMeta();
 });
 
+let tabTrap = true;
 els.input.addEventListener('keydown', (e) => {
-  if (e.key === 'Tab') {
-    e.preventDefault();
-    const start = els.input.selectionStart;
-    const end = els.input.selectionEnd;
-    const val = els.input.value;
-    els.input.value = val.substring(0, start) + '  ' + val.substring(end);
-    els.input.selectionStart = els.input.selectionEnd = start + 2;
-    updateInputMeta();
+  if (e.key === 'Escape') {
+    tabTrap = false;
+    return;
+  }
+  if (e.key !== 'Tab' || !tabTrap || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) {
+    if (e.key !== 'Tab') tabTrap = true;
+    return;
+  }
+  e.preventDefault();
+  if (!document.execCommand('insertText', false, '  ')) {
+    const s = els.input.selectionStart;
+    els.input.setRangeText('  ', s, els.input.selectionEnd, 'end');
+    els.input.dispatchEvent(new Event('input'));
   }
 });
+els.input.addEventListener('blur', () => { tabTrap = true; });
 
-// 增加文件后缀校验、异常监听与单文件 10MB 熔断保护
+// 增加文件后缀校验（支持 .js/.mjs/.cjs）、异常监听与单文件 10MB 熔断保护
 function readFile(file) {
   if (!file) return;
-  if (!/\.js$/i.test(file.name)) {
-    showError(`不支持的文件类型："${file.name}"，请上传或拖入 .js 格式的 JavaScript 脚本。`);
+  if (!/\.(?:c|m)?js$/i.test(file.name)) {
+    showError(`不支持的文件类型："${file.name}"，请上传或拖入 .js / .mjs / .cjs 格式的 JavaScript 脚本。`);
     return;
   }
   if (file.size > 10 * 1024 * 1024) {
@@ -351,10 +403,21 @@ if (els.dropZone) {
 }
 
 els.fileInput.addEventListener('change', () => {
-  readFile(els.fileInput.files[0]);
+  const f = els.fileInput.files[0];
+  els.fileInput.value = '';
+  readFile(f);
 });
 
-els.input.addEventListener('input', updateInputMeta);
+// 全局阻止用户拖拽文件落到窗口空白区导致浏览器跳走
+['dragover', 'drop'].forEach((eventName) => {
+  window.addEventListener(eventName, (e) => e.preventDefault());
+});
+
+let metaTimer = null;
+els.input.addEventListener('input', () => {
+  clearTimeout(metaTimer);
+  metaTimer = setTimeout(updateInputMeta, 150);
+});
 updateInputMeta();
 
 // 采用库原生认可的标准纯净域名/通配后缀，杜绝多层转义失效引起的 SyntaxError
@@ -507,8 +570,14 @@ els.obfuscateBtn.addEventListener('click', () => {
     return;
   }
   const codeBytes = bytes(code);
-  if (codeBytes > 10 * 1024 * 1024) {
-    showError('输入代码体积超过 10MB 限制，纯前端浏览器环境混淆可能导致标签页内存溢出崩溃。');
+  const est = estimateRun(currentPreset, codeBytes);
+
+  if (codeBytes > MAX_INPUT_BYTES[est.tier]) {
+    showError(`当前混淆强度（${est.tier}）下输入上限为 ${formatBytes(MAX_INPUT_BYTES[est.tier])}（本次输入 ${formatBytes(codeBytes)}）。请降低强度或拆分文件。`);
+    return;
+  }
+
+  if (est.seconds > 45 && !confirm(`根据代码体积与混淆强度，预计本次计算需耗时约 ${Math.round(est.seconds)} 秒，输出体积可能成倍增长。是否确认继续执行？`)) {
     return;
   }
 
@@ -545,12 +614,13 @@ els.obfuscateBtn.addEventListener('click', () => {
 
   els.obfuscateBtn.disabled = true;
   els.obfuscateBtn.textContent = '混淆计算中...';
+  if (els.cancelBtn) els.cancelBtn.hidden = false;
   els.copyBtn.disabled = true;
   els.downloadBtn.disabled = true;
   els.downloadMapBtn.disabled = true;
   els.downloadMapBtn.hidden = true;
   hideError();
-  setEngineStatus('running', '正在混淆…（高强度计算可能需要数秒）');
+  setEngineStatus('running', `正在混淆…（预计约 ${Math.max(1, Math.round(est.seconds))} 秒）`);
 
   if (watchdogTimer) clearTimeout(watchdogTimer);
   watchdogTimer = setTimeout(() => {
@@ -561,9 +631,9 @@ els.obfuscateBtn.addEventListener('click', () => {
       }
       resetRunningState();
       setEngineStatus('error', '混淆执行超时');
-      showError('混淆执行超时（已超过 60 秒）已自动终止保护。\n建议：源码较大或嵌套较深时，请尝试关闭「控制流平坦化」或「死代码注入」以减少计算开销。');
+      showError(`混淆执行超时（已超过 ${Math.round(est.timeoutMs / 1000)} 秒熔断上限）已自动终止保护。\n建议：源码较大或嵌套较深时，请尝试关闭「控制流平坦化」或「死代码注入」以减少计算开销。`);
     }
-  }, 60000);
+  }, est.timeoutMs);
 
   const seedRaw = els.optSeed.value.trim();
   const payload = {
@@ -579,9 +649,10 @@ els.obfuscateBtn.addEventListener('click', () => {
 });
 
 els.copyBtn.addEventListener('click', async () => {
-  if (!els.output.value) return;
+  const content = lastOutput || els.output.value;
+  if (!content) return;
   try {
-    await navigator.clipboard.writeText(els.output.value);
+    await navigator.clipboard.writeText(content);
     const originalText = els.copyBtn.textContent;
     els.copyBtn.textContent = '✓ 已复制';
     setTimeout(() => { els.copyBtn.textContent = originalText; }, 1800);
@@ -612,8 +683,9 @@ function download(filename, content) {
 }
 
 els.downloadBtn.addEventListener('click', () => {
-  if (els.output.value) {
-    download('obfuscated.js', els.output.value);
+  const content = lastOutput || els.output.value;
+  if (content) {
+    download('obfuscated.js', content);
   }
 });
 
@@ -622,3 +694,6 @@ els.downloadMapBtn.addEventListener('click', () => {
     download('obfuscated.js.map', lastMap);
   }
 });
+
+// 页面加载空闲时预热 Worker
+(window.requestIdleCallback || setTimeout)(() => getWorker());

@@ -19,9 +19,9 @@
     </div>
   </div>
   <div class="topbar-right">
-    <div id="statusIndicator" class="status-indicator ready">
+    <div id="statusIndicator" class="status-indicator running" role="status" aria-live="polite">
       <span class="led"></span>
-      <span id="statusIndicatorText">引擎就绪 (本地离线)</span>
+      <span id="statusIndicatorText">引擎加载中…</span>
     </div>
     <a class="ghost-link" href="https://github.com/zaofengyue/JsObf" target="_blank" rel="noopener">★ GitHub 源码 / 部署</a>
   </div>
@@ -31,10 +31,10 @@
   <section class="panel-toolbar">
     <div class="toolbar-row">
       <div class="preset-tabs" role="tablist" aria-label="混淆强度预设">
-        <button class="preset-tab is-active" data-preset="low">低混淆</button>
-        <button class="preset-tab" data-preset="medium">中混淆</button>
-        <button class="preset-tab" data-preset="high">高混淆</button>
-        <button class="preset-tab" data-preset="custom">自定义</button>
+        <button class="preset-tab is-active" role="tab" aria-selected="true" data-preset="low">低混淆</button>
+        <button class="preset-tab" role="tab" aria-selected="false" data-preset="medium">中混淆</button>
+        <button class="preset-tab" role="tab" aria-selected="false" data-preset="high">高混淆</button>
+        <button class="preset-tab" role="tab" aria-selected="false" data-preset="custom">自定义</button>
       </div>
       <div class="toolbar-actions">
         <button id="btnExample" class="ghost-btn btn-sm">加载示例</button>
@@ -148,13 +148,14 @@
         <span class="meta" id="inputMeta">0 行 · 0 B</span>
       </div>
       <div class="textarea-wrap" id="dropZone">
-        <textarea id="inputCode" spellcheck="false" placeholder="把 JavaScript 源代码粘贴到这里，或将 .js 文件拖拽到此处，也可以点击下方按钮上传…"></textarea>
+        <textarea id="inputCode" aria-label="原始 JavaScript 代码" spellcheck="false" placeholder="把 JavaScript 源代码粘贴到这里，或将 .js/.mjs/.cjs 文件拖拽到此处，也可以点击下方按钮上传…"></textarea>
       </div>
       <div class="editor-actions">
         <label class="file-btn">
           上传 .js 文件
-          <input type="file" id="fileInput" accept=".js" hidden>
+          <input type="file" id="fileInput" accept=".js,.mjs,.cjs" hidden>
         </label>
+        <button id="cancelBtn" class="ghost-btn" hidden>取消</button>
         <button id="obfuscateBtn" class="primary-btn">▶ 混淆代码</button>
       </div>
     </div>
@@ -167,7 +168,7 @@
         <span class="meta" id="outputMeta">—</span>
       </div>
       <div class="textarea-wrap">
-        <textarea id="outputCode" spellcheck="false" readonly placeholder="点击「混淆代码」后，混淆后的 JavaScript 将呈现于此…"></textarea>
+        <textarea id="outputCode" aria-label="混淆结果" spellcheck="false" readonly placeholder="点击「混淆代码」后，混淆后的 JavaScript 将呈现于此…"></textarea>
       </div>
       <div class="editor-actions">
         <button id="copyBtn" class="ghost-btn" disabled>复制结果</button>

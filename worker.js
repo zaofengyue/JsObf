@@ -1,6 +1,9 @@
 // worker.js —— 在独立线程里跑混淆，避免大文件/高强度选项卡住页面主线程
 importScripts('lib/javascript-obfuscator.browser.js');
 
+// 脚本加载完成，向主线程派发引擎就绪事件
+self.postMessage({ type: 'ready' });
+
 // 三档预设：直接映射 javascript-obfuscator 的官方参数组合
 const PRESETS = {
   low: {
