@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JS-Obf · 浏览器端 JavaScript 混淆工具</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark">&#9635;</span>
+    <div>
+      <h1>JS-Obf</h1>
+      <p class="tagline">在浏览器里混淆 JavaScript，代码不上传，不留痕迹。</p>
+    </div>
+  </div>
+  <a class="ghost-link" href="https://github.com/" target="_blank" rel="noopener">源码 / 部署说明</a>
+</header>
+
+<main>
+  <section class="panel-toolbar">
+    <div class="preset-tabs" role="tablist" aria-label="混淆强度预设">
+      <button class="preset-tab is-active" data-preset="low">低混淆</button>
+      <button class="preset-tab" data-preset="medium">中混淆</button>
+      <button class="preset-tab" data-preset="high">高混淆</button>
+      <button class="preset-tab" data-preset="custom">自定义</button>
+    </div>
+    <p class="preset-desc" id="presetDesc">变量重命名 + 压缩，性能损耗最小，适合日常使用。</p>
+  </section>
+
+  <section id="customPanel" class="custom-panel" hidden>
+    <div class="option-grid">
+
+      <label class="option">
+        <span>标识符命名风格</span>
+        <select id="optIdentifier">
+          <option value="hexadecimal">hex（_0x1a2b）</option>
+          <option value="mangled">mangled（a, b, c…）</option>
+          <option value="base64">base64（长随机名）</option>
+        </select>
+      </label>
+
+      <label class="option">
+        <span>字符串加密</span>
+        <select id="optStringEncoding">
+          <option value="none">不加密</option>
+          <option value="base64" selected>base64</option>
+          <option value="rc4">rc4（更强，体积更大）</option>
+        </select>
+      </label>
+
+      <label class="option option-check">
+        <input type="checkbox" id="optStringRotate">
+        <span>字符串数组轮转 / 打乱</span>
+      </label>
+
+      <label class="option option-check">
+        <input type="checkbox" id="optControlFlow">
+        <span>控制流平坦化<em>（较慢，体积明显增大）</em></span>
+      </label>
+
+      <label class="option option-check">
+        <input type="checkbox" id="optDeadCode">
+        <span>死代码注入</span>
+      </label>
+
+      <label class="option option-check">
+        <input type="checkbox" id="optSelfDefending">
+        <span>自我防御<em>（会影响 DevTools 调试）</em></span>
+      </label>
+
+      <label class="option option-check">
+        <input type="checkbox" id="optDebugProtection">
+        <span>调试保护<em>（打开控制台会卡死页面）</em></span>
+      </label>
+
+      <label class="option option-check">
+        <input type="checkbox" id="optSourceMap">
+        <span>生成 Source Map</span>
+      </label>
+
+      <label class="option option-domain">
+        <span>域名锁定（可留空）</span>
+        <input type="text" id="optDomainLock" placeholder="example.com, sub.example.com">
+        <small>填写后，混淆代码只能在这些域名下运行 —— 部署前请再三确认，配置错误会导致代码在自己站点也无法执行。</small>
+      </label>
+
+    </div>
+  </section>
+
+  <section class="editors">
+    <div class="editor-col">
+      <div class="editor-head">
+        <span>原始代码</span>
+        <span class="meta" id="inputMeta">0 行 · 0 B</span>
+      </div>
+      <textarea id="inputCode" spellcheck="false" placeholder="把 JavaScript 代码粘贴到这里，或点击下方按钮上传 .js 文件…"></textarea>
+      <div class="editor-actions">
+        <label class="file-btn">
+          上传 .js 文件
+          <input type="file" id="fileInput" accept=".js" hidden>
+        </label>
+        <button id="obfuscateBtn" class="primary-btn">混淆 →</button>
+      </div>
+    </div>
+
+    <div class="editor-col">
+      <div class="editor-head">
+        <span>混淆结果</span>
+        <span class="meta" id="outputMeta">—</span>
+      </div>
+      <textarea id="outputCode" spellcheck="false" readonly placeholder="混淆结果会显示在这里…"></textarea>
+      <div class="editor-actions">
+        <button id="copyBtn" class="ghost-btn" disabled>复制</button>
+        <button id="downloadBtn" class="ghost-btn" disabled>下载 .js</button>
+        <button id="downloadMapBtn" class="ghost-btn" disabled hidden>下载 Source Map</button>
+      </div>
+    </div>
+  </section>
+
+  <p class="status" id="statusLine" aria-live="polite"></p>
+
+  <footer class="disclaimer">
+    混淆不等于加密，只是提高逆向门槛 —— 不要用它替代服务端的敏感逻辑校验（比如把密钥、License 校验硬编码进前端代码）。
+    代码全程只在你的浏览器里处理，本页不会把任何内容上传到服务器。
+  </footer>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>
