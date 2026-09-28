@@ -60,14 +60,6 @@ JS-Obf 为纯静态架构，不依赖任何 Node.js 服务端运行时：
 
 ---
 
-## 自动化发布 Releases 说明（开发者参考）
-
-仓库已配置 GitHub Actions 自动化打包发布工作流（`.github/workflows/release.yml`）：
-- **自动触发**：推送版本 Tag（例如 `git tag v1.1.0 && git push origin v1.1.0`）会自动触发 CI 构建，仅提取生产必需文件打包为 `jsobf-pages.zip` 并发布到 GitHub Releases。
-- **手动触发**：在 GitHub 网页端的 **Actions** 标签页中，选中 **Release Pages Bundle**，点击 **Run workflow** 亦可随时一键手动打包与发布。
-
----
-
 ## 部署后排错与上线自检清单
 
 部署完成后，建议在浏览器中按 `F12` 打开控制台并验证：
