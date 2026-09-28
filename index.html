@@ -126,8 +126,8 @@
 
       <label class="option option-domain">
         <span>域名锁定（Domain Lock，多域名逗号分隔，可留空）</span>
-        <input type="text" id="optDomainLock" placeholder="example.com, api.example.com">
-        <small>注意：开启后，混淆代码仅能在指定域名下执行。若在未绑定的域名或本地直接打开，代码将拒绝运行！</small>
+        <input type="text" id="optDomainLock" placeholder="例如: *.example.com (主域及子域), app.com (仅该主机), localhost">
+        <small>注意：开启后，混淆代码仅能在指定域名下执行（*.example.com 匹配主域及子域；单个 example.com 仅匹配完全一致的主机）。在未绑定域名或本地直接打开将拒绝运行！</small>
       </label>
 
     </div>

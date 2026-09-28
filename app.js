@@ -100,6 +100,15 @@ let lastMap = null;
 let worker = null;
 let activeRequestId = 0;
 let watchdogTimer = null;
+let runSnapshot = null;
+
+// 高性能统计行数（避免 multi-MB 输入触发 split('\n') 导致巨额数组开销）
+function countLines(s) {
+  if (!s) return 0;
+  let n = 1, i = -1;
+  while ((i = s.indexOf('\n', i + 1)) !== -1) n++;
+  return n;
+}
 
 function setEngineStatus(state, msg) {
   els.statusIndicator.className = `status-indicator ${state}`;
@@ -142,18 +151,17 @@ function handleWorkerMessage(e) {
 
     let errorMsg = `混淆执行失败: ${error}`;
     if (line !== null && line !== undefined) {
-      errorMsg = `[语法错误 SyntaxError] 第 ${line} 行，第 ${column || 0} 列：\n${error}\n\n请检查源码中是否存在尚未闭合的括号、非法变量名或非标准 JS 语法。`;
+      errorMsg = `[语法错误 SyntaxError] 第 ${line} 行，第 ${(column ?? 0) + 1} 列：\n${error}\n\n请检查源码中是否存在尚未闭合的括号、非法变量名或非标准 JS 语法。`;
     }
     showError(errorMsg);
     return;
   }
 
   els.output.value = result;
-  const origCode = els.input.value.trim();
-  const origBytes = bytes(origCode);
+  const origBytes = runSnapshot ? runSnapshot.bytes : 0;
+  const origLines = runSnapshot ? runSnapshot.lines : 0;
   const obfBytes = bytes(result);
-  const origLines = origCode ? origCode.split('\n').length : 0;
-  const obfLines = result ? result.split('\n').length : 0;
+  const obfLines = countLines(result);
 
   els.outputMeta.textContent = `${obfLines} 行 · ${formatBytes(obfBytes)}`;
 
@@ -237,7 +245,7 @@ function formatBytes(b) {
 
 function updateInputMeta() {
   const code = els.input.value;
-  const lines = code ? code.split('\n').length : 0;
+  const lines = countLines(code);
   els.inputMeta.textContent = `${lines} 行 · ${formatBytes(bytes(code))}`;
 }
 
@@ -359,21 +367,25 @@ function sanitizeAndValidateDomain(domainStr) {
   const rawList = [];
   const invalid = [];
 
+  const LABEL = '[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?';
+  const domainRegex = new RegExp(`^(?:\\*\\.)?(?:${LABEL}\\.)+${LABEL}$|^localhost$`, 'i');
+  const ipv4Regex = /^(?:\d{1,3}\.){3}\d{1,3}$/;
+
   for (const raw of parts) {
     // 1. 去除协议头 (http://, https://, //)
     let clean = raw.replace(/^(https?:)?\/\//i, '').trim();
     // 2. 先截断路径、查询参数和哈希 (提取首个 /、? 或 # 之前的主机段)
     clean = clean.split(/[/?#]/)[0].trim();
-    // 3. 再剥离端口号 (如 :8080)
-    clean = clean.replace(/:\d+$/, '').trim();
+    // 3. 再剥离端口号 (如 :8080) 并小写化
+    clean = clean.replace(/:\d+$/, '').trim().toLowerCase();
 
-    // 允许 localhost、example.com、*.example.com 等
-    const domainRegex = /^(\*\.)?([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$|^localhost$/i;
-    if (domainRegex.test(clean)) {
+    const isWildcard = clean.startsWith('*.');
+    const host = isWildcard ? clean.slice(2) : clean;
+
+    if ((domainRegex.test(clean) || ipv4Regex.test(clean)) && !(isWildcard && ipv4Regex.test(host))) {
       rawList.push(clean);
-      // javascript-obfuscator 原生逻辑中，剥离 *. 后传入根域名即自动匹配所有子域
-      const standardDomain = clean.startsWith('*.') ? clean.slice(2) : clean;
-      validatedDomains.push(standardDomain);
+      // *.example.com -> .example.com (以点开头代表匹配主域及所有子域名；普通 example.com 仅匹配完全一致的主机)
+      validatedDomains.push(isWildcard ? '.' + host : host);
     } else {
       invalid.push(raw);
     }
@@ -382,7 +394,7 @@ function sanitizeAndValidateDomain(domainStr) {
   if (invalid.length > 0) {
     return {
       ok: false,
-      error: `域名锁定格式不合法: "${invalid.join(', ')}"\n请输入标准的主机名或域名（如 example.com、*.example.com 或 api.site.com，无需加 http:// 或 / 路径）。`,
+      error: `域名锁定格式不合法: "${invalid.join(', ')}"\n请输入标准的主机名、域名或 IP（如 example.com、*.example.com 或 127.0.0.1，无需加 http:// 或 / 路径）。`,
       domains: [...new Set(validatedDomains)],
       rawList: [...new Set(rawList)],
     };
@@ -427,7 +439,7 @@ function checkRiskWarnings() {
   if (domainRaw) {
     const domainCheck = sanitizeAndValidateDomain(domainRaw);
     if (domainCheck.ok && domainCheck.rawList.length > 0) {
-      warnings.push(`「域名锁定」：代码将仅限在 [${domainCheck.rawList.join(', ')}] 运行，在未绑定的域名或本地打开将直接无法执行。`);
+      warnings.push(`「域名锁定」：代码将仅限在 [${domainCheck.rawList.join(', ')}] 运行（*.example.com 匹配主域及所有子域，单个 example.com 仅匹配完全一致的主机）。在未绑定的域名或本地打开将直接无法执行。`);
     }
   }
 
@@ -489,15 +501,19 @@ function readCustomOptions(validatedDomains) {
 }
 
 els.obfuscateBtn.addEventListener('click', () => {
-  const code = els.input.value.trim();
-  if (!code) {
+  const code = els.input.value;
+  if (!code.trim()) {
     showError('提示：请先在左侧输入或上传一段 JavaScript 代码。');
     return;
   }
-  if (bytes(code) > 10 * 1024 * 1024) {
+  const codeBytes = bytes(code);
+  if (codeBytes > 10 * 1024 * 1024) {
     showError('输入代码体积超过 10MB 限制，纯前端浏览器环境混淆可能导致标签页内存溢出崩溃。');
     return;
   }
+
+  // 记录混淆发起时的快照，避免受后续异步干扰或文本行数统计误差
+  runSnapshot = { bytes: codeBytes, lines: countLines(code) };
 
   let validatedDomains = [];
   if (currentPreset === 'custom') {
