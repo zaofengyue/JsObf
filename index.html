@@ -48,6 +48,15 @@
     <div class="option-grid">
 
       <label class="option">
+        <span>运行目标环境（Target）</span>
+        <select id="optTarget">
+          <option value="browser" selected>browser（浏览器）</option>
+          <option value="browser-no-eval">browser-no-eval（无 eval 浏览器沙盒）</option>
+          <option value="node">node（Node.js 服务端）</option>
+        </select>
+      </label>
+
+      <label class="option">
         <span>标识符命名风格</span>
         <select id="optIdentifier">
           <option value="hexadecimal">hex（_0x1a2b）</option>
@@ -66,7 +75,7 @@
 
       <label class="option">
         <span>随机种子（可选）</span>
-        <input type="number" id="optSeed" placeholder="留空为随机，指定数字可复现">
+        <input type="number" id="optSeed" step="1" placeholder="非 0 整数可复现；留空为随机">
       </label>
 
       <label class="option option-check">
@@ -81,7 +90,12 @@
 
       <label class="option option-check">
         <input type="checkbox" id="optStringRotate" checked>
-        <span>字符串数组轮转 / 打乱<em>（破坏自动化解密还原）</em></span>
+        <span>字符串数组轮转<em>（对字符串数组进行位移偏移）</em></span>
+      </label>
+
+      <label class="option option-check">
+        <input type="checkbox" id="optStringShuffle" checked>
+        <span>字符串数组打乱<em>（随机打乱数组元素顺序）</em></span>
       </label>
 
       <label class="option option-check">

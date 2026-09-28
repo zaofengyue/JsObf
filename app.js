@@ -1,5 +1,5 @@
 const PRESET_DESC = {
-  low: '变量重命名 + 压缩，性能损耗最小，适合日常开发与生产部署。',
+  low: '短名压缩（mangled）+ 结构紧凑化，体积最小、性能最好，适合生产与日常发布。',
   medium: '字符串提取与 Base64 加密 + 轮转打乱 + 数值等价表达式，兼顾安全性与运行速度。',
   high: '控制流平坦化 + RC4 字符串加密 + 死代码注入 + 字符串拆分 + Unicode 转义 + 对象键名混淆，最强防护（体积和计算代价最大）。',
   custom: '自由配置各项变换，支持数值混淆、控制流平坦化、死代码注入及域名锁定等。',
@@ -79,12 +79,14 @@ const els = {
   riskWarningBox: document.getElementById('riskWarningBox'),
   riskWarningText: document.getElementById('riskWarningText'),
   // 自定义选项控件
+  optTarget: document.getElementById('optTarget'),
   optIdentifier: document.getElementById('optIdentifier'),
   optStringEncoding: document.getElementById('optStringEncoding'),
   optSeed: document.getElementById('optSeed'),
   optNumbersToExpressions: document.getElementById('optNumbersToExpressions'),
   optUnicodeEscapeSequence: document.getElementById('optUnicodeEscapeSequence'),
   optStringRotate: document.getElementById('optStringRotate'),
+  optStringShuffle: document.getElementById('optStringShuffle'),
   optSplitStrings: document.getElementById('optSplitStrings'),
   optTransformObjectKeys: document.getElementById('optTransformObjectKeys'),
   optDisableConsole: document.getElementById('optDisableConsole'),
@@ -100,6 +102,7 @@ const COST_S_PER_MB = { low: 8, medium: 15, high: 70 };
 const MAX_INPUT_BYTES = { low: 10 << 20, medium: 5 << 20, high: 2 << 20 };
 const OUTPUT_DISPLAY_LIMIT = 2 << 20; // 2 MB
 let lastOutput = '';
+let baseName = 'obfuscated';
 
 let currentPreset = 'low';
 let lastMap = null;
@@ -315,6 +318,7 @@ els.tabs.forEach((tab) => {
 
 els.btnExample.addEventListener('click', () => {
   cancelIfRunning();
+  baseName = 'obfuscated';
   els.input.value = EXAMPLE_JS;
   updateInputMeta();
   hideError();
@@ -322,6 +326,7 @@ els.btnExample.addEventListener('click', () => {
 
 els.btnClear.addEventListener('click', () => {
   cancelIfRunning();
+  baseName = 'obfuscated';
   els.input.value = '';
   els.output.value = '';
   lastOutput = '';
@@ -365,6 +370,7 @@ function readFile(file) {
     showError('文件体积超过 10MB 限制，纯前端浏览器环境混淆可能导致标签页内存溢出崩溃。');
     return;
   }
+  baseName = file.name.replace(/\.[cm]?js$/i, '') + '.obf';
   const reader = new FileReader();
   reader.onload = () => {
     els.input.value = reader.result;
@@ -473,25 +479,24 @@ function sanitizeAndValidateDomain(domainStr) {
 function syncOptionInterlocks() {
   const isStringDisabled = els.optStringEncoding.value === 'none';
 
-  els.optStringRotate.disabled = isStringDisabled;
-  els.optSplitStrings.disabled = isStringDisabled;
-
-  const rotateLabel = els.optStringRotate.closest('.option-check');
-  const splitLabel = els.optSplitStrings.closest('.option-check');
-
-  if (rotateLabel) rotateLabel.classList.toggle('is-disabled', isStringDisabled);
-  if (splitLabel) splitLabel.classList.toggle('is-disabled', isStringDisabled);
-
-  if (isStringDisabled) {
-    els.optStringRotate.checked = false;
-    els.optSplitStrings.checked = false;
+  for (const el of [els.optStringRotate, els.optStringShuffle]) {
+    if (el) {
+      el.disabled = isStringDisabled;
+      el.closest('.option-check')?.classList.toggle('is-disabled', isStringDisabled);
+    }
   }
+  // splitStrings 独立于字符串数组，不在此处强制联动或清空用户的已选项
 }
 
 function checkRiskWarnings() {
   syncOptionInterlocks();
   const warnings = [];
 
+  if (els.optTarget && els.optTarget.value === 'node') {
+    if (els.optSelfDefending.checked || els.optDebugProtection.checked) {
+      warnings.push('「运行目标」：当前目标为 node，自我防御与调试保护是面向浏览器环境设计的特性，在 Node 环境中可能不适用。');
+    }
+  }
   if (els.optSelfDefending.checked) {
     warnings.push('「自我防御」：代码将强制以紧凑压缩模式运行，任何外部格式化、美化或篡改都会直接触发死循环阻断。');
   }
@@ -516,7 +521,7 @@ function checkRiskWarnings() {
 }
 
 els.optStringEncoding.addEventListener('change', checkRiskWarnings);
-[els.optSelfDefending, els.optDebugProtection, els.optDomainLock].forEach((item) => {
+[els.optSelfDefending, els.optDebugProtection, els.optDomainLock, els.optTarget].filter(Boolean).forEach((item) => {
   item.addEventListener('input', checkRiskWarnings);
   item.addEventListener('change', checkRiskWarnings);
 });
@@ -526,16 +531,17 @@ syncOptionInterlocks();
 function readCustomOptions(validatedDomains) {
   const identifierNamesGenerator = els.optIdentifier.value;
   const stringEncoding = els.optStringEncoding.value;
-  const seedRaw = els.optSeed.value.trim();
   const isStringArrayEnabled = stringEncoding !== 'none';
+  const target = els.optTarget ? els.optTarget.value : 'browser';
 
   const options = {
     compact: true,
     renameGlobals: false, // 显式锁定全局变量命名为 false，杜绝不同内核版本的配置飘移
+    target,
     identifierNamesGenerator,
     numbersToExpressions: els.optNumbersToExpressions.checked,
     unicodeEscapeSequence: els.optUnicodeEscapeSequence.checked,
-    splitStrings: isStringArrayEnabled && els.optSplitStrings.checked,
+    splitStrings: els.optSplitStrings.checked,
     splitStringsChunkLength: 5,
     transformObjectKeys: els.optTransformObjectKeys.checked,
     disableConsoleOutput: els.optDisableConsole.checked,
@@ -547,13 +553,17 @@ function readCustomOptions(validatedDomains) {
     stringArrayEncoding: isStringArrayEnabled ? [stringEncoding] : [],
     stringArrayThreshold: 0.75,
     stringArrayRotate: isStringArrayEnabled && els.optStringRotate.checked,
-    stringArrayShuffle: isStringArrayEnabled && els.optStringRotate.checked,
+    stringArrayShuffle: isStringArrayEnabled && (els.optStringShuffle ? els.optStringShuffle.checked : true),
     selfDefending: els.optSelfDefending.checked,
     debugProtection: els.optDebugProtection.checked,
   };
 
+  const seedRaw = els.optSeed.value.trim();
   if (seedRaw) {
-    options.seed = seedRaw;
+    const num = Number(seedRaw);
+    if (Number.isInteger(num) && num !== 0) {
+      options.seed = num;
+    }
   }
 
   if (validatedDomains && validatedDomains.length > 0) {
@@ -636,13 +646,27 @@ els.obfuscateBtn.addEventListener('click', () => {
   }, est.timeoutMs);
 
   const seedRaw = els.optSeed.value.trim();
+  let seedVal = null;
+  if (seedRaw) {
+    const num = Number(seedRaw);
+    if (!Number.isInteger(num) || num === 0) {
+      showError('随机种子必须是非 0 整数（0 在引擎中表示真随机，无法复现）。');
+      return;
+    }
+    seedVal = num;
+  }
+
+  const target = currentPreset === 'custom' && els.optTarget ? els.optTarget.value : null;
+
   const payload = {
     requestId: reqId,
     code,
     preset: currentPreset,
-    seed: currentPreset === 'custom' ? (seedRaw || null) : null,
+    seed: seedVal,
     custom: currentPreset === 'custom' ? readCustomOptions(validatedDomains) : null,
     sourceMap,
+    outName: `${baseName}.js`,
+    target,
   };
 
   w.postMessage(payload);
@@ -665,8 +689,8 @@ els.copyBtn.addEventListener('click', async () => {
   }
 });
 
-function download(filename, content) {
-  const blob = new Blob([content], { type: 'text/javascript;charset=utf-8' });
+function download(filename, content, type = 'text/javascript;charset=utf-8') {
+  const blob = new Blob([content], { type });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.style.display = 'none';
@@ -685,13 +709,13 @@ function download(filename, content) {
 els.downloadBtn.addEventListener('click', () => {
   const content = lastOutput || els.output.value;
   if (content) {
-    download('obfuscated.js', content);
+    download(`${baseName}.js`, content, 'text/javascript;charset=utf-8');
   }
 });
 
 els.downloadMapBtn.addEventListener('click', () => {
   if (lastMap) {
-    download('obfuscated.js.map', lastMap);
+    download(`${baseName}.js.map`, lastMap, 'application/json');
   }
 });
 

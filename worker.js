@@ -17,6 +17,7 @@ const PRESETS = {
     splitStrings: false,
     transformObjectKeys: false,
     renameGlobals: false,
+    identifierNamesGenerator: 'mangled',
   },
   medium: {
     compact: true,
@@ -58,7 +59,7 @@ const PRESETS = {
 };
 
 self.onmessage = function (e) {
-  const { requestId, code, preset, custom, sourceMap, seed } = e.data;
+  const { requestId, code, preset, custom, sourceMap, seed, outName, target } = e.data;
 
   try {
     const baseOptions = preset === 'custom' ? (custom || {}) : { ...PRESETS[preset] };
@@ -68,6 +69,10 @@ self.onmessage = function (e) {
       sourceMap: !!sourceMap,
       sourceMapMode: 'separate',
     };
+
+    if (target) {
+      options.target = target;
+    }
 
     // 优先统一提取种子：优先级为 custom.seed -> e.data.seed -> baseOptions.seed
     const rawSeed = (custom && custom.seed !== undefined && custom.seed !== null && custom.seed !== '')
@@ -83,11 +88,15 @@ self.onmessage = function (e) {
     }
 
     const result = JavaScriptObfuscator.obfuscate(code, options);
+    let outCode = result.getObfuscatedCode();
+    if (sourceMap && outName) {
+      outCode += `\n//# sourceMappingURL=${outName}.map`;
+    }
 
     self.postMessage({
       requestId,
       ok: true,
-      code: result.getObfuscatedCode(),
+      code: outCode,
       sourceMap: sourceMap ? result.getSourceMap() : null,
     });
   } catch (err) {
