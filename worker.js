@@ -8,6 +8,11 @@ const PRESETS = {
     controlFlowFlattening: false,
     deadCodeInjection: false,
     stringArray: false,
+    numbersToExpressions: false,
+    unicodeEscapeSequence: false,
+    disableConsoleOutput: false,
+    splitStrings: false,
+    transformObjectKeys: false,
     renameGlobals: false,
   },
   medium: {
@@ -17,6 +22,13 @@ const PRESETS = {
     stringArray: true,
     stringArrayEncoding: ['base64'],
     stringArrayThreshold: 0.75,
+    stringArrayRotate: true,
+    stringArrayShuffle: true,
+    numbersToExpressions: true,
+    unicodeEscapeSequence: false,
+    disableConsoleOutput: false,
+    splitStrings: false,
+    transformObjectKeys: false,
     renameGlobals: false,
   },
   high: {
@@ -30,6 +42,14 @@ const PRESETS = {
     stringArrayThreshold: 1,
     stringArrayRotate: true,
     stringArrayShuffle: true,
+    numbersToExpressions: true,
+    unicodeEscapeSequence: true,
+    disableConsoleOutput: false,
+    splitStrings: true,
+    splitStringsChunkLength: 5,
+    transformObjectKeys: true,
+    selfDefending: false, // 保持安全默认，避免未提示即锁死
+    debugProtection: false,
     renameGlobals: false,
   },
 };
@@ -38,13 +58,18 @@ self.onmessage = function (e) {
   const { code, preset, custom, sourceMap } = e.data;
 
   try {
-    const baseOptions = preset === 'custom' ? custom : { ...PRESETS[preset] };
+    const baseOptions = preset === 'custom' ? (custom || {}) : { ...PRESETS[preset] };
     const options = {
       ...baseOptions,
       identifierNamesGenerator: baseOptions.identifierNamesGenerator || 'hexadecimal',
       sourceMap: !!sourceMap,
       sourceMapMode: 'separate',
     };
+
+    if (baseOptions.seed !== undefined && baseOptions.seed !== null && baseOptions.seed !== '') {
+      const numSeed = Number(baseOptions.seed);
+      options.seed = isNaN(numSeed) ? String(baseOptions.seed) : numSeed;
+    }
 
     const result = JavaScriptObfuscator.obfuscate(code, options);
 
@@ -54,9 +79,25 @@ self.onmessage = function (e) {
       sourceMap: sourceMap ? result.getSourceMap() : null,
     });
   } catch (err) {
+    let message = '未知错误';
+    let line = null;
+    let column = null;
+
+    if (err) {
+      message = err.message || String(err);
+      // 尝试从 Acorn / Obfuscator 错误信息中提取行号和列号 (如 "Unexpected token (10:2)")
+      const match = message.match(/\((\d+):(\d+)\)/);
+      if (match) {
+        line = parseInt(match[1], 10);
+        column = parseInt(match[2], 10);
+      }
+    }
+
     self.postMessage({
       ok: false,
-      error: err && err.message ? err.message : String(err),
+      error: message,
+      line: line,
+      column: column,
     });
   }
 };
