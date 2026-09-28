@@ -161,13 +161,19 @@ function handleWorkerMessage(e) {
   els.statObfSize.textContent = formatBytes(obfBytes);
   els.statLinesCompare.textContent = `${origLines} 行 → ${obfLines} 行`;
 
-  const deltaPercent = origBytes === 0 ? 0 : (((obfBytes - origBytes) / origBytes) * 100).toFixed(1);
-  if (deltaPercent >= 0) {
-    els.statDeltaRate.className = 'stats-badge grow';
-    els.statDeltaRate.textContent = `+${deltaPercent}% (体积膨胀)`;
+  const diffBytes = obfBytes - origBytes;
+  if (diffBytes === 0 || origBytes === 0) {
+    els.statDeltaRate.className = 'stats-badge';
+    els.statDeltaRate.textContent = '0.0% (持平)';
   } else {
-    els.statDeltaRate.className = 'stats-badge shrink';
-    els.statDeltaRate.textContent = `${deltaPercent}% (体积压缩)`;
+    const absRate = ((Math.abs(diffBytes) / origBytes) * 100).toFixed(1);
+    if (diffBytes > 0) {
+      els.statDeltaRate.className = 'stats-badge grow';
+      els.statDeltaRate.textContent = `+${absRate}% (体积膨胀)`;
+    } else {
+      els.statDeltaRate.className = 'stats-badge shrink';
+      els.statDeltaRate.textContent = `-${absRate}% (体积压缩)`;
+    }
   }
   els.statsPanel.style.display = 'grid';
 
@@ -354,7 +360,13 @@ function sanitizeAndValidateDomain(domainStr) {
   const invalid = [];
 
   for (const raw of parts) {
-    let clean = raw.replace(/^https?:\/\//i, '').replace(/:\d+$/, '').replace(/\/.*$/, '').trim();
+    // 1. 去除协议头 (http://, https://, //)
+    let clean = raw.replace(/^(https?:)?\/\//i, '').trim();
+    // 2. 先截断路径、查询参数和哈希 (提取首个 /、? 或 # 之前的主机段)
+    clean = clean.split(/[/?#]/)[0].trim();
+    // 3. 再剥离端口号 (如 :8080)
+    clean = clean.replace(/:\d+$/, '').trim();
+
     // 允许 localhost、example.com、*.example.com 等
     const domainRegex = /^(\*\.)?([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$|^localhost$/i;
     if (domainRegex.test(clean)) {
