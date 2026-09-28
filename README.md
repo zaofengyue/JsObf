@@ -64,7 +64,8 @@ python -m http.server 8080
 
 ## 部署
 
-支持一键推送到 Cloudflare Pages、GitHub Pages、Vercel 等纯静态托管平台，详见 [DEPLOY.md](./DEPLOY.md)。
+- **快速部署（开箱即用）**：可直接前往 [GitHub Releases](https://github.com/zaofengyue/JsObf/releases) 下载最新由 CI 自动化打包好的 `jsobf-pages.zip`，上传到 Cloudflare Pages 即可 1 分钟上线。
+- **自定义部署**：支持与 GitHub 联动自动部署到 Cloudflare Pages、GitHub Pages、Vercel 或任意静态主机，详见 [DEPLOY.md](./DEPLOY.md)。
 
 ## 关于混淆安全边界
 

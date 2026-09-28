@@ -1,0 +1,13 @@
+# 统一所有文本文件在签出与提交时均使用标准 LF 换行符
+* text=auto eol=lf
+
+# 明确常用文本文件类型
+*.html text eol=lf
+*.css text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.txt text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
