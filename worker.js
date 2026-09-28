@@ -55,7 +55,7 @@ const PRESETS = {
 };
 
 self.onmessage = function (e) {
-  const { requestId, code, preset, custom, sourceMap } = e.data;
+  const { requestId, code, preset, custom, sourceMap, seed } = e.data;
 
   try {
     const baseOptions = preset === 'custom' ? (custom || {}) : { ...PRESETS[preset] };
@@ -66,9 +66,17 @@ self.onmessage = function (e) {
       sourceMapMode: 'separate',
     };
 
-    if (baseOptions.seed !== undefined && baseOptions.seed !== null && baseOptions.seed !== '') {
-      const numSeed = Number(baseOptions.seed);
-      options.seed = isNaN(numSeed) ? String(baseOptions.seed) : numSeed;
+    // 优先统一提取种子：优先级为 custom.seed -> e.data.seed -> baseOptions.seed
+    const rawSeed = (custom && custom.seed !== undefined && custom.seed !== null && custom.seed !== '')
+      ? custom.seed
+      : ((seed !== undefined && seed !== null && seed !== '') ? seed : baseOptions.seed);
+
+    if (rawSeed !== undefined && rawSeed !== null && rawSeed !== '') {
+      const numSeed = Number(rawSeed);
+      options.seed = isNaN(numSeed) ? String(rawSeed) : numSeed;
+    } else {
+      // 显式删除 options.seed，彻底防止解构残留的空串或非法假值覆盖库原生的真随机种子机制
+      delete options.seed;
     }
 
     const result = JavaScriptObfuscator.obfuscate(code, options);

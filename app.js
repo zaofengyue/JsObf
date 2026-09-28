@@ -122,12 +122,12 @@ function resetRunningState() {
     watchdogTimer = null;
   }
   els.obfuscateBtn.disabled = false;
+  els.obfuscateBtn.textContent = '▶ 混淆代码';
 }
 
 // 统一的 Worker 消息处理（校验 requestId）
 function handleWorkerMessage(e) {
   if (!e.data || e.data.requestId !== activeRequestId) {
-    // 丢弃非当前请求的过期响应，消除异步竞态
     return;
   }
 
@@ -157,7 +157,6 @@ function handleWorkerMessage(e) {
 
   els.outputMeta.textContent = `${obfLines} 行 · ${formatBytes(obfBytes)}`;
 
-  // 渲染统计指标
   els.statOrigSize.textContent = formatBytes(origBytes);
   els.statObfSize.textContent = formatBytes(obfBytes);
   els.statLinesCompare.textContent = `${origLines} 行 → ${obfLines} 行`;
@@ -186,7 +185,6 @@ function handleWorkerMessage(e) {
   setEngineStatus('ready', '混淆完成');
 }
 
-// 获取 Worker 实例并挂载健壮的生命周期错误监听
 function getWorker() {
   if (!worker) {
     try {
@@ -205,7 +203,6 @@ function getWorker() {
       const msg = event && event.message ? event.message : 'Web Worker 内部加载或脚本解析发生错误';
       showError(`[Web Worker 异常] ${msg}\n\n可能原因：\n1. 直接使用 file:// 协议打开，触发同源隔离限制；\n2. lib/javascript-obfuscator.browser.js 路径未找到或加载受 CSP 拦截。\n建议：通过静态 HTTP 服务访问本工具。`);
       
-      // 终止并重置，防止 Worker 损坏后后续混淆死锁
       if (worker) {
         worker.terminate();
         worker = null;
@@ -238,7 +235,6 @@ function updateInputMeta() {
   els.inputMeta.textContent = `${lines} 行 · ${formatBytes(bytes(code))}`;
 }
 
-// 标签切换
 els.tabs.forEach((tab) => {
   tab.addEventListener('click', () => {
     els.tabs.forEach((t) => t.classList.remove('is-active'));
@@ -249,7 +245,6 @@ els.tabs.forEach((tab) => {
   });
 });
 
-// 加载示例与清空
 els.btnExample.addEventListener('click', () => {
   els.input.value = EXAMPLE_JS;
   updateInputMeta();
@@ -269,7 +264,6 @@ els.btnClear.addEventListener('click', () => {
   updateInputMeta();
 });
 
-// Tab 缩进支持 (2 空格)
 els.input.addEventListener('keydown', (e) => {
   if (e.key === 'Tab') {
     e.preventDefault();
@@ -282,7 +276,25 @@ els.input.addEventListener('keydown', (e) => {
   }
 });
 
-// 拖拽上传 .js 文件支持
+// 增加文件读取异常监听与单文件 10MB 熔断保护
+function readFile(file) {
+  if (!file) return;
+  if (file.size > 10 * 1024 * 1024) {
+    showError('文件体积超过 10MB 限制，纯前端浏览器环境混淆可能导致标签页内存溢出崩溃。');
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => {
+    els.input.value = reader.result;
+    updateInputMeta();
+    hideError();
+  };
+  reader.onerror = () => {
+    showError(`无法读取文件 "${file.name}": 文件权限受限或已被系统锁定。`);
+  };
+  reader.readAsText(file);
+}
+
 if (els.dropZone) {
   ['dragenter', 'dragover'].forEach((eventName) => {
     els.dropZone.addEventListener(eventName, (e) => {
@@ -303,21 +315,9 @@ if (els.dropZone) {
   els.dropZone.addEventListener('drop', (e) => {
     const dt = e.dataTransfer;
     if (dt && dt.files && dt.files.length > 0) {
-      const file = dt.files[0];
-      readFile(file);
+      readFile(dt.files[0]);
     }
   });
-}
-
-function readFile(file) {
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = () => {
-    els.input.value = reader.result;
-    updateInputMeta();
-    hideError();
-  };
-  reader.readAsText(file);
 }
 
 els.fileInput.addEventListener('change', () => {
@@ -327,22 +327,25 @@ els.fileInput.addEventListener('change', () => {
 els.input.addEventListener('input', updateInputMeta);
 updateInputMeta();
 
-// 联动校验与防呆：清洗并验证用户输入的域名
+// 采用库原生认可的标准纯净域名/通配后缀，杜绝多层转义失效引起的 SyntaxError
 function sanitizeAndValidateDomain(domainStr) {
   if (!domainStr || !domainStr.trim()) {
-    return { ok: true, domains: [] };
+    return { ok: true, domains: [], rawList: [] };
   }
   const parts = domainStr.split(',').map((s) => s.trim()).filter(Boolean);
-  const cleaned = [];
+  const validatedDomains = [];
+  const rawList = [];
   const invalid = [];
 
   for (const raw of parts) {
-    // 自动剥离用户误填的 http://、https:// 前缀、路径后缀以及端口号
     let clean = raw.replace(/^https?:\/\//i, '').replace(/:\d+$/, '').replace(/\/.*$/, '').trim();
-    // 基础主机名/域名正则校验 (允许 localhost、example.com、*.example.com、sub.example.com 等)
+    // 允许 localhost、example.com、*.example.com 等
     const domainRegex = /^(\*\.)?([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$|^localhost$/i;
     if (domainRegex.test(clean)) {
-      cleaned.push(clean);
+      rawList.push(clean);
+      // javascript-obfuscator 原生逻辑中，剥离 *. 后传入根域名即自动匹配所有子域
+      const standardDomain = clean.startsWith('*.') ? clean.slice(2) : clean;
+      validatedDomains.push(standardDomain);
     } else {
       invalid.push(raw);
     }
@@ -351,19 +354,18 @@ function sanitizeAndValidateDomain(domainStr) {
   if (invalid.length > 0) {
     return {
       ok: false,
-      error: `域名锁定格式不合法: "${invalid.join(', ')}"\n请输入标准的主机名或域名（如 example.com 或 api.site.com，无需加 http:// 或 / 路径）。`,
-      domains: cleaned,
+      error: `域名锁定格式不合法: "${invalid.join(', ')}"\n请输入标准的主机名或域名（如 example.com、*.example.com 或 api.site.com，无需加 http:// 或 / 路径）。`,
+      domains: validatedDomains,
+      rawList: rawList,
     };
   }
 
-  return { ok: true, domains: cleaned };
+  return { ok: true, domains: validatedDomains, rawList: rawList };
 }
 
-// 选项动态联动与互锁（UI Interlock）
 function syncOptionInterlocks() {
   const isStringDisabled = els.optStringEncoding.value === 'none';
 
-  // 当字符串未开启加密时，依赖于字符串数组的打乱与分块强制禁用并置灰
   els.optStringRotate.disabled = isStringDisabled;
   els.optSplitStrings.disabled = isStringDisabled;
 
@@ -379,7 +381,6 @@ function syncOptionInterlocks() {
   }
 }
 
-// 高风险选项动态提示
 function checkRiskWarnings() {
   syncOptionInterlocks();
   const warnings = [];
@@ -393,8 +394,8 @@ function checkRiskWarnings() {
   const domainRaw = els.optDomainLock.value.trim();
   if (domainRaw) {
     const domainCheck = sanitizeAndValidateDomain(domainRaw);
-    if (domainCheck.ok && domainCheck.domains.length > 0) {
-      warnings.push(`「域名锁定」：代码将仅限在 [${domainCheck.domains.join(', ')}] 运行，在未绑定的域名或本地打开将直接无法执行。`);
+    if (domainCheck.ok && domainCheck.rawList.length > 0) {
+      warnings.push(`「域名锁定」：代码将仅限在 [${domainCheck.rawList.join(', ')}] 运行，在未绑定的域名或本地打开将直接无法执行。`);
     }
   }
 
@@ -413,7 +414,6 @@ els.optStringEncoding.addEventListener('change', checkRiskWarnings);
   item.addEventListener('change', checkRiskWarnings);
 });
 
-// 初始化选项互锁状态
 syncOptionInterlocks();
 
 function readCustomOptions(validatedDomains) {
@@ -424,6 +424,7 @@ function readCustomOptions(validatedDomains) {
 
   const options = {
     compact: true,
+    renameGlobals: false, // 显式锁定全局变量命名为 false，杜绝不同内核版本的配置飘移
     identifierNamesGenerator,
     numbersToExpressions: els.optNumbersToExpressions.checked,
     unicodeEscapeSequence: els.optUnicodeEscapeSequence.checked,
@@ -455,7 +456,6 @@ function readCustomOptions(validatedDomains) {
   return options;
 }
 
-// 点击混淆
 els.obfuscateBtn.addEventListener('click', () => {
   const code = els.input.value.trim();
   if (!code) {
@@ -477,7 +477,6 @@ els.obfuscateBtn.addEventListener('click', () => {
   }
 
   const sourceMap = currentPreset === 'custom' && els.optSourceMap.checked;
-
   const risky = currentPreset === 'custom' &&
     (els.optDebugProtection.checked || validatedDomains.length > 0);
 
@@ -493,6 +492,7 @@ els.obfuscateBtn.addEventListener('click', () => {
   const reqId = ++activeRequestId;
 
   els.obfuscateBtn.disabled = true;
+  els.obfuscateBtn.textContent = '混淆计算中...';
   els.copyBtn.disabled = true;
   els.downloadBtn.disabled = true;
   els.downloadMapBtn.disabled = true;
@@ -500,7 +500,6 @@ els.obfuscateBtn.addEventListener('click', () => {
   hideError();
   setEngineStatus('running', '正在混淆…（高强度计算可能需要数秒）');
 
-  // 60秒超时保护 Watchdog，防止不可恢复的死循环卡死
   if (watchdogTimer) clearTimeout(watchdogTimer);
   watchdogTimer = setTimeout(() => {
     if (els.obfuscateBtn.disabled && activeRequestId === reqId) {
@@ -514,10 +513,12 @@ els.obfuscateBtn.addEventListener('click', () => {
     }
   }, 60000);
 
+  const seedRaw = els.optSeed.value.trim();
   const payload = {
     requestId: reqId,
     code,
     preset: currentPreset,
+    seed: seedRaw || null,
     custom: currentPreset === 'custom' ? readCustomOptions(validatedDomains) : null,
     sourceMap,
   };
@@ -525,7 +526,6 @@ els.obfuscateBtn.addEventListener('click', () => {
   w.postMessage(payload);
 });
 
-// 复制
 els.copyBtn.addEventListener('click', async () => {
   if (!els.output.value) return;
   try {
@@ -542,7 +542,6 @@ els.copyBtn.addEventListener('click', async () => {
   }
 });
 
-// 安全文件下载：解决移动端/特定浏览器异步下载取消风险与 Blob 内存泄漏
 function download(filename, content) {
   const blob = new Blob([content], { type: 'text/javascript;charset=utf-8' });
   const url = URL.createObjectURL(blob);
@@ -551,12 +550,10 @@ function download(filename, content) {
   a.href = url;
   a.download = filename;
 
-  // 必须挂载至 DOM 树以兼容沙箱与部分现代浏览器安全策略
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
 
-  // 延时 4000ms 撤销对象 URL，确保异步下载流程完整拉起，避免网络错误，同时防止内存泄漏
   setTimeout(() => {
     URL.revokeObjectURL(url);
   }, 4000);
