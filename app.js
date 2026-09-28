@@ -96,6 +96,9 @@ const els = {
   optDebugProtection: document.getElementById('optDebugProtection'),
   optSourceMap: document.getElementById('optSourceMap'),
   optDomainLock: document.getElementById('optDomainLock'),
+  optReservedNames: document.getElementById('optReservedNames'),
+  optReservedStrings: document.getElementById('optReservedStrings'),
+  optDebugInterval: document.getElementById('optDebugInterval'),
 };
 
 const COST_S_PER_MB = { low: 8, medium: 15, high: 70 };
@@ -501,7 +504,12 @@ function checkRiskWarnings() {
     warnings.push('「自我防御」：代码将强制以紧凑压缩模式运行，任何外部格式化、美化或篡改都会直接触发死循环阻断。');
   }
   if (els.optDebugProtection.checked) {
-    warnings.push('「调试保护」：在浏览器中打开 DevTools (F12) 控制台时将触发无限断点并冻结页面。');
+    const interval = Math.max(0, parseInt(els.optDebugInterval?.value, 10) || 0);
+    if (interval > 0) {
+      warnings.push(`「调试保护」：在浏览器中打开 DevTools (F12) 控制台时将触发断点，并以每 ${interval}ms 间隔持续轮询冻结页面。`);
+    } else {
+      warnings.push('「调试保护」：在浏览器中打开 DevTools (F12) 控制台时将触发无限断点并冻结页面。');
+    }
   }
   const domainRaw = els.optDomainLock.value.trim();
   if (domainRaw) {
@@ -521,7 +529,7 @@ function checkRiskWarnings() {
 }
 
 els.optStringEncoding.addEventListener('change', checkRiskWarnings);
-[els.optSelfDefending, els.optDebugProtection, els.optDomainLock, els.optTarget].filter(Boolean).forEach((item) => {
+[els.optSelfDefending, els.optDebugProtection, els.optDomainLock, els.optTarget, els.optDebugInterval].filter(Boolean).forEach((item) => {
   item.addEventListener('input', checkRiskWarnings);
   item.addEventListener('change', checkRiskWarnings);
 });
@@ -533,6 +541,10 @@ function readCustomOptions(validatedDomains) {
   const stringEncoding = els.optStringEncoding.value;
   const isStringArrayEnabled = stringEncoding !== 'none';
   const target = els.optTarget ? els.optTarget.value : 'browser';
+
+  const parseList = (v) => (v ? v.split(',').map((s) => s.trim()).filter(Boolean) : []);
+  const reservedNames = parseList(els.optReservedNames?.value);
+  const reservedStrings = parseList(els.optReservedStrings?.value);
 
   const options = {
     compact: true,
@@ -557,6 +569,16 @@ function readCustomOptions(validatedDomains) {
     selfDefending: els.optSelfDefending.checked,
     debugProtection: els.optDebugProtection.checked,
   };
+
+  if (reservedNames.length > 0) options.reservedNames = reservedNames;
+  if (reservedStrings.length > 0) options.reservedStrings = reservedStrings;
+
+  const debugInterval = els.optDebugProtection.checked && els.optDebugInterval
+    ? Math.max(0, parseInt(els.optDebugInterval.value, 10) || 0)
+    : 0;
+  if (debugInterval > 0) {
+    options.debugProtectionInterval = debugInterval;
+  }
 
   const seedRaw = els.optSeed.value.trim();
   if (seedRaw) {

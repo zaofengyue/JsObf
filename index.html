@@ -144,6 +144,21 @@
         <small>注意：开启后，混淆代码仅能在指定域名下执行（*.example.com 匹配主域及子域；单个 example.com 仅匹配完全一致的主机）。在未绑定域名或本地直接打开将拒绝运行！</small>
       </label>
 
+      <label class="option">
+        <span>保留标识符（保持原名不被混淆，逗号分隔）</span>
+        <input type="text" id="optReservedNames" placeholder="例如: init, myPublicApi, /^on[A-Z]/">
+      </label>
+
+      <label class="option">
+        <span>保留字符串（保持明文不被加密，逗号分隔）</span>
+        <input type="text" id="optReservedStrings" placeholder="例如: react, /api/v1, secret">
+      </label>
+
+      <label class="option">
+        <span>调试保护持续间隔 ms（0 为仅进入控制台触发一次）</span>
+        <input type="number" id="optDebugInterval" min="0" step="500" placeholder="例如: 2000，开启定时轮询冻结">
+      </label>
+
     </div>
 
     <div id="riskWarningBox" class="risk-warning-box" role="alert" style="display:none;">

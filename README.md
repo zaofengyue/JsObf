@@ -37,10 +37,12 @@ JsObf/
 ├── styles.css                           # 现代风格样式与动效
 ├── app.js                              # 交互逻辑、参数采集与状态反馈
 ├── worker.js                           # Web Worker：独立线程调用混淆引擎
+├── _headers                            # Cloudflare Pages 安全标头与 CSP 防线
+├── LICENSE                             # MIT 开源授权协议
 ├── README.md                           # 项目说明文档
 ├── DEPLOY.md                           # 静态站点部署指南
 └── lib/
-    └── javascript-obfuscator.browser.js # 本地构建版混淆核心库
+    └── javascript-obfuscator.browser.js # 本地构建版混淆核心库 (javascript-obfuscator@5.8.0)
 ```
 
 ## 本地预览
@@ -71,4 +73,5 @@ python -m http.server 8080
 
 ## License
 
-MIT
+- 本项目基于 [MIT](./LICENSE) 协议开源。
+- 核心混淆引擎内置了 [javascript-obfuscator](https://github.com/javascript-obfuscator/javascript-obfuscator) 浏览器端构建版本，遵循其原生的 BSD-2-Clause 授权协议。

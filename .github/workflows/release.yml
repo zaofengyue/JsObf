@@ -25,6 +25,7 @@ jobs:
           mkdir -p dist/lib
           cp index.html styles.css app.js worker.js dist/
           cp lib/javascript-obfuscator.browser.js dist/lib/
+          [ -f _headers ] && cp _headers dist/
           cd dist
           zip -r ../jsobf-pages.zip ./*
           cd ..
