@@ -246,12 +246,24 @@ els.tabs.forEach((tab) => {
 });
 
 els.btnExample.addEventListener('click', () => {
+  activeRequestId++;
+  if (worker) {
+    worker.terminate();
+    worker = null;
+  }
+  resetRunningState();
   els.input.value = EXAMPLE_JS;
   updateInputMeta();
   hideError();
 });
 
 els.btnClear.addEventListener('click', () => {
+  activeRequestId++;
+  if (worker) {
+    worker.terminate();
+    worker = null;
+  }
+  resetRunningState();
   els.input.value = '';
   els.output.value = '';
   els.outputMeta.textContent = '—';
@@ -276,9 +288,13 @@ els.input.addEventListener('keydown', (e) => {
   }
 });
 
-// 增加文件读取异常监听与单文件 10MB 熔断保护
+// 增加文件后缀校验、异常监听与单文件 10MB 熔断保护
 function readFile(file) {
   if (!file) return;
+  if (!/\.js$/i.test(file.name)) {
+    showError(`不支持的文件类型："${file.name}"，请上传或拖入 .js 格式的 JavaScript 脚本。`);
+    return;
+  }
   if (file.size > 10 * 1024 * 1024) {
     showError('文件体积超过 10MB 限制，纯前端浏览器环境混淆可能导致标签页内存溢出崩溃。');
     return;
@@ -355,12 +371,16 @@ function sanitizeAndValidateDomain(domainStr) {
     return {
       ok: false,
       error: `域名锁定格式不合法: "${invalid.join(', ')}"\n请输入标准的主机名或域名（如 example.com、*.example.com 或 api.site.com，无需加 http:// 或 / 路径）。`,
-      domains: validatedDomains,
-      rawList: rawList,
+      domains: [...new Set(validatedDomains)],
+      rawList: [...new Set(rawList)],
     };
   }
 
-  return { ok: true, domains: validatedDomains, rawList: rawList };
+  return {
+    ok: true,
+    domains: [...new Set(validatedDomains)],
+    rawList: [...new Set(rawList)],
+  };
 }
 
 function syncOptionInterlocks() {
@@ -462,6 +482,10 @@ els.obfuscateBtn.addEventListener('click', () => {
     showError('提示：请先在左侧输入或上传一段 JavaScript 代码。');
     return;
   }
+  if (bytes(code) > 10 * 1024 * 1024) {
+    showError('输入代码体积超过 10MB 限制，纯前端浏览器环境混淆可能导致标签页内存溢出崩溃。');
+    return;
+  }
 
   let validatedDomains = [];
   if (currentPreset === 'custom') {
@@ -478,10 +502,10 @@ els.obfuscateBtn.addEventListener('click', () => {
 
   const sourceMap = currentPreset === 'custom' && els.optSourceMap.checked;
   const risky = currentPreset === 'custom' &&
-    (els.optDebugProtection.checked || validatedDomains.length > 0);
+    (els.optSelfDefending.checked || els.optDebugProtection.checked || validatedDomains.length > 0);
 
   if (risky && !confirm(
-    '当前开启了「调试保护」或「域名锁定」——若未部署到目标域名或试图调试，代码将无法正常执行。确认以此配置混淆吗？'
+    '当前开启了「自我防御」、「调试保护」或「域名锁定」——若未按规范部署或试图调试格式化，代码将无法正常执行。确认以此配置混淆吗？'
   )) {
     return;
   }
@@ -518,7 +542,7 @@ els.obfuscateBtn.addEventListener('click', () => {
     requestId: reqId,
     code,
     preset: currentPreset,
-    seed: seedRaw || null,
+    seed: currentPreset === 'custom' ? (seedRaw || null) : null,
     custom: currentPreset === 'custom' ? readCustomOptions(validatedDomains) : null,
     sourceMap,
   };

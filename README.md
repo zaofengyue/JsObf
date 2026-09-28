@@ -32,15 +32,13 @@
 ## 目录结构
 
 ```
-JsObf-main/
+JsObf/
 ├── index.html                           # 页面骨架与选项面板
 ├── styles.css                           # 现代风格样式与动效
 ├── app.js                              # 交互逻辑、参数采集与状态反馈
 ├── worker.js                           # Web Worker：独立线程调用混淆引擎
-├── CHANGELOG.md                        # 本地版本更新日志
 ├── README.md                           # 项目说明文档
 ├── DEPLOY.md                           # 静态站点部署指南
-├── 项目方案.txt                        # 项目方案设计文档
 └── lib/
     └── javascript-obfuscator.browser.js # 本地构建版混淆核心库
 ```

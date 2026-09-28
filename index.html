@@ -91,7 +91,7 @@
 
       <label class="option option-check">
         <input type="checkbox" id="optTransformObjectKeys">
-        <span>混淆对象键名<em>（obj['key'] 混淆）</em></span>
+        <span>混淆对象键名<em>（obj['key'] 混淆，若代码依赖 JSON 序列化、反射或接口键名匹配请勿开启）</em></span>
       </label>
 
       <label class="option option-check">
@@ -132,7 +132,7 @@
 
     </div>
 
-    <div id="riskWarningBox" class="risk-warning-box" style="display:none;">
+    <div id="riskWarningBox" class="risk-warning-box" role="alert" style="display:none;">
       <strong>高防护安全提醒：</strong>
       <span id="riskWarningText"></span>
     </div>
@@ -198,7 +198,7 @@
   </section>
 
   <!-- 诊断与错误提示 -->
-  <div id="errorBox" class="error-box" style="display: none;"></div>
+  <div id="errorBox" class="error-box" role="alert" style="display: none;"></div>
 
   <footer class="disclaimer">
     <strong>安全须知：</strong>代码混淆旨在提高逆向工程与静态反编译难度，绝不能替代服务端敏感逻辑与鉴权校验（切勿在前端代码中硬编码任何 API 密钥或鉴权令牌）。
