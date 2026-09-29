@@ -163,12 +163,16 @@ function resetRunningState() {
 }
 
 function cancelIfRunning() {
+  const wasRunning = els.obfuscateBtn.disabled;
   activeRequestId++;
-  if (els.obfuscateBtn.disabled && worker) {
+  if (wasRunning && worker) {
     worker.terminate();
     worker = null;
   }
   resetRunningState();
+  if (wasRunning) {
+    setEngineStatus('ready', '引擎就绪');
+  }
 }
 
 if (els.cancelBtn) {
@@ -489,6 +493,16 @@ function syncOptionInterlocks() {
     }
   }
   // splitStrings 独立于字符串数组，不在此处强制联动或清空用户的已选项
+
+  // target=node 时，domainLock/selfDefending/debugProtection 会被引擎直接拒绝
+  // （Validation failed: domainLock only allowed for browser targets），
+  // 因此在 UI 层面禁用这些控件，避免用户组合出必然失败的配置
+  const isNodeTarget = els.optTarget && els.optTarget.value === 'node';
+  for (const el of [els.optDomainLock, els.optSelfDefending, els.optDebugProtection, els.optDebugInterval]) {
+    if (!el) continue;
+    el.disabled = isNodeTarget;
+    el.closest('.option, .option-check')?.classList.toggle('is-disabled', isNodeTarget);
+  }
 }
 
 function checkRiskWarnings() {
@@ -496,9 +510,7 @@ function checkRiskWarnings() {
   const warnings = [];
 
   if (els.optTarget && els.optTarget.value === 'node') {
-    if (els.optSelfDefending.checked || els.optDebugProtection.checked) {
-      warnings.push('「运行目标」：当前目标为 node，自我防御与调试保护是面向浏览器环境设计的特性，在 Node 环境中可能不适用。');
-    }
+    warnings.push('「运行目标」：当前目标为 node。域名锁定、自我防御、调试保护均为浏览器专属特性（引擎在 node 目标下会直接拒绝这些选项），已在下方禁用并且不会被提交。');
   }
   if (els.optSelfDefending.checked) {
     warnings.push('「自我防御」：代码将强制以紧凑压缩模式运行，任何外部格式化、美化或篡改都会直接触发死循环阻断。');
@@ -542,7 +554,10 @@ function readCustomOptions(validatedDomains) {
   const isStringArrayEnabled = stringEncoding !== 'none';
   const target = els.optTarget ? els.optTarget.value : 'browser';
 
-  const parseList = (v) => (v ? v.split(',').map((s) => s.trim()).filter(Boolean) : []);
+  // 引擎的正则形式选项不接受外层的 /.../，此处兼容用户带或不带斜杠两种写法
+  const parseList = (v) => (v
+    ? v.split(',').map((s) => s.trim().replace(/^\/(.*)\/$/, '$1')).filter(Boolean)
+    : []);
   const reservedNames = parseList(els.optReservedNames?.value);
   const reservedStrings = parseList(els.optReservedStrings?.value);
 
@@ -566,8 +581,10 @@ function readCustomOptions(validatedDomains) {
     stringArrayThreshold: 0.75,
     stringArrayRotate: isStringArrayEnabled && els.optStringRotate.checked,
     stringArrayShuffle: isStringArrayEnabled && (els.optStringShuffle ? els.optStringShuffle.checked : true),
-    selfDefending: els.optSelfDefending.checked,
-    debugProtection: els.optDebugProtection.checked,
+    // domainLock/selfDefending/debugProtection 仅浏览器目标可用；即使复选框在切换到
+    // node 之前已被勾选，这里也强制忽略，防止残留状态触发引擎的 Validation failed
+    selfDefending: target !== 'node' && els.optSelfDefending.checked,
+    debugProtection: target !== 'node' && els.optDebugProtection.checked,
   };
 
   if (reservedNames.length > 0) options.reservedNames = reservedNames;
@@ -588,7 +605,7 @@ function readCustomOptions(validatedDomains) {
     }
   }
 
-  if (validatedDomains && validatedDomains.length > 0) {
+  if (target !== 'node' && validatedDomains && validatedDomains.length > 0) {
     options.domainLock = validatedDomains;
   }
 
@@ -613,11 +630,26 @@ els.obfuscateBtn.addEventListener('click', () => {
     return;
   }
 
+  // 种子校验需在设置"运行中"状态之前完成，避免校验失败时按钮/状态灯卡死
+  const seedRaw = els.optSeed.value.trim();
+  let seedVal = null;
+  if (seedRaw) {
+    const num = Number(seedRaw);
+    if (!Number.isInteger(num) || num === 0) {
+      showError('随机种子必须是非 0 整数（0 在引擎中表示真随机，无法复现）。');
+      return;
+    }
+    seedVal = num;
+  }
+
   // 记录混淆发起时的快照，避免受后续异步干扰或文本行数统计误差
   runSnapshot = { bytes: codeBytes, lines: countLines(code) };
 
+  const target = currentPreset === 'custom' && els.optTarget ? els.optTarget.value : null;
+  const isNodeTarget = target === 'node';
+
   let validatedDomains = [];
-  if (currentPreset === 'custom') {
+  if (currentPreset === 'custom' && !isNodeTarget) {
     const domainRaw = els.optDomainLock.value.trim();
     if (domainRaw) {
       const domainCheck = sanitizeAndValidateDomain(domainRaw);
@@ -630,7 +662,7 @@ els.obfuscateBtn.addEventListener('click', () => {
   }
 
   const sourceMap = currentPreset === 'custom' && els.optSourceMap.checked;
-  const risky = currentPreset === 'custom' &&
+  const risky = currentPreset === 'custom' && !isNodeTarget &&
     (els.optSelfDefending.checked || els.optDebugProtection.checked || validatedDomains.length > 0);
 
   if (risky && !confirm(
@@ -667,19 +699,6 @@ els.obfuscateBtn.addEventListener('click', () => {
     }
   }, est.timeoutMs);
 
-  const seedRaw = els.optSeed.value.trim();
-  let seedVal = null;
-  if (seedRaw) {
-    const num = Number(seedRaw);
-    if (!Number.isInteger(num) || num === 0) {
-      showError('随机种子必须是非 0 整数（0 在引擎中表示真随机，无法复现）。');
-      return;
-    }
-    seedVal = num;
-  }
-
-  const target = currentPreset === 'custom' && els.optTarget ? els.optTarget.value : null;
-
   const payload = {
     requestId: reqId,
     code,
@@ -703,8 +722,22 @@ els.copyBtn.addEventListener('click', async () => {
     els.copyBtn.textContent = '✓ 已复制';
     setTimeout(() => { els.copyBtn.textContent = originalText; }, 1800);
   } catch {
-    els.output.select();
-    document.execCommand('copy');
+    // 回退方案：output 文本框在超大结果时只显示占位提示，不能直接 select() 它，
+    // 需借助一个不可见的临时 textarea 承载真实的 content 再执行 copy 命令
+    const ta = document.createElement('textarea');
+    ta.value = content;
+    ta.style.position = 'fixed';
+    ta.style.top = '0';
+    ta.style.left = '0';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    try {
+      document.execCommand('copy');
+    } finally {
+      document.body.removeChild(ta);
+    }
     const originalText = els.copyBtn.textContent;
     els.copyBtn.textContent = '✓ 已复制';
     setTimeout(() => { els.copyBtn.textContent = originalText; }, 1800);

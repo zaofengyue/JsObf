@@ -195,6 +195,14 @@ main {
   cursor: not-allowed;
   pointer-events: none;
 }
+.option.is-disabled {
+  opacity: 0.45;
+}
+.option.is-disabled input,
+.option.is-disabled select {
+  cursor: not-allowed;
+  background: #f2f2ef;
+}
 .option-check input:disabled {
   cursor: not-allowed;
 }
